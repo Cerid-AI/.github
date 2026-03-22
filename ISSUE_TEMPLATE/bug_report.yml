@@ -1,0 +1,71 @@
+name: Bug Report
+description: Report a bug or unexpected behavior
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill this out as completely as possible.
+
+  - type: dropdown
+    id: repo
+    attributes:
+      label: Repository
+      description: Which Cerid AI project is affected?
+      options:
+        - cerid-ai (Knowledge Companion)
+        - cerid-boardroom
+        - cerid-trading-agent
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+      placeholder: When I do X, Y happens instead of Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps to reproduce the issue.
+      placeholder: |
+        1. Start services with `./scripts/start-cerid.sh`
+        2. Navigate to ...
+        3. Run command ...
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs or Output
+      description: Paste logs here (run `docker logs ai-companion-mcp --tail 50` or equivalent).
+      render: shell
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Docker version, Python version, etc.
+      placeholder: |
+        OS: macOS 15.x / Ubuntu 24.04
+        Docker: 29.x / Compose v2.x
+        Python: 3.11.x
+        Node: 22.x
+    validations:
+      required: true
