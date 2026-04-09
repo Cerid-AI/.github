@@ -17,17 +17,6 @@ A self-hosted personal AI workspace that unifies multi-domain knowledge bases in
 - Hallucination detection, memory extraction, conversation intelligence
 - Electron desktop app + Docker deployment
 
-### [Cerid Boardroom](https://github.com/Cerid-AI/cerid-boardroom)
-A multi-agent virtual business operations platform. Specialized AI executives collaborate to handle research, planning, operations, and decision support — orchestrated through a Next.js dashboard.
-
-### [Cerid Trading Agent](https://github.com/Cerid-AI/cerid-trading-agent)
-An autonomous crypto trading agent powered by Cerid AI. A LangGraph state machine orchestrates five specialized agents — signal scanning, knowledge enrichment, risk management, execution, and post-trade analysis — with hard safety limits enforced throughout.
-
-- VPIN toxicity detection, Kelly sizing, VaR, circuit breakers
-- Iceberg order execution on Hyperliquid
-- Polymarket signal integration
-- Paper mode by default
-
 ---
 
 ## Philosophy
