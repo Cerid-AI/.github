@@ -1,0 +1,117 @@
+name: runner-preflight
+
+# Picks where a private repo's CI jobs run: the self-hosted `mac-pro` pool when it
+# is online, hosted `ubuntu-latest` when it is not. Callers route jobs with
+#   runs-on: ${{ fromJSON(needs.preflight.outputs.target) }}
+# and jobs that boot docker use `docker_target` instead.
+#
+# No `concurrency:` block on purpose. A called workflow shares the caller's
+# `github.workflow`, so the policy's `${{ github.workflow }}-${{ github.ref }}`
+# group would name the caller's own group and cancel or deadlock it. The
+# caller's concurrency already covers this job.
+#
+# Ported from cerid-ai-internal's ci.yml preflight, whose comments record
+# why each branch below exists (2026-08-07 hosted-override outage, the
+# September 2026 Dependabot probe failures that were 94% of its hosted minutes).
+
+on:
+  workflow_call:
+    inputs:
+      declared:
+        description: "Operator override (the caller's vars.CI_HEAVY_RUNNER), a JSON runs-on value. Outranks the probe."
+        type: string
+        default: ""
+    secrets:
+      RUNNER_STATUS_TOKEN:
+        description: "Token that can read the org's self-hosted runners (fine-grained PAT, org permission Self-hosted runners: read)."
+        required: false
+    outputs:
+      target:
+        value: ${{ jobs.pick.outputs.target }}
+      why:
+        value: ${{ jobs.pick.outputs.why }}
+      docker_target:
+        value: ${{ jobs.pick.outputs.docker_target }}
+      docker_why:
+        value: ${{ jobs.pick.outputs.docker_why }}
+
+permissions:
+  contents: read
+
+jobs:
+  pick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      target: ${{ steps.pick.outputs.target }}
+      why: ${{ steps.pick.outputs.why }}
+      docker_target: ${{ steps.pick.outputs.docker_target }}
+      docker_why: ${{ steps.pick.outputs.docker_why }}
+    steps:
+      - id: pick
+        env:
+          GH_TOKEN: ${{ secrets.RUNNER_STATUS_TOKEN || github.token }}
+          DECLARED: ${{ inputs.declared }}
+          EVENT: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -uo pipefail
+          UBUNTU='"ubuntu-latest"'
+          SELF='["self-hosted","mac-pro"]'
+          SELF_DOCKER='["self-hosted","mac-pro","docker"]'
+          emit() { printf 'target=%s\nwhy=%s\ndocker_target=%s\ndocker_why=%s\n' "$1" "$2" "$3" "$4" >> "$GITHUB_OUTPUT"; }
+
+          # A piped `gh secret set` stores the trailing newline, and a token with
+          # whitespace is rejected as 401 like a revoked one.
+          raw="${GH_TOKEN:-}"
+          GH_TOKEN="$(printf '%s' "$raw" | tr -d '[:space:]')"
+          export GH_TOKEN
+          if [ "${#raw}" -ne "${#GH_TOKEN}" ]; then
+            echo "::warning::RUNNER_STATUS_TOKEN contained whitespace; re-set it interactively so the stored value is exact."
+          fi
+
+          # Fork PRs never reach a self-hosted runner.
+          if [ "$EVENT" = "pull_request" ] && [ -n "$HEAD_REPO" ] && [ "$HEAD_REPO" != "$REPO" ]; then
+            emit "$UBUNTU" "fork PR: self-hosted is never offered to untrusted code" "$UBUNTU" "fork PR"
+            exit 0
+          fi
+
+          if [ -n "${DECLARED:-}" ]; then
+            emit "$DECLARED" "operator-declared CI_HEAVY_RUNNER overrides the probe" "$DECLARED" "operator-declared CI_HEAVY_RUNNER"
+            exit 0
+          fi
+
+          # The pool is registered at the org, so read the org list; the repo list
+          # is kept for repos that still carry repo-level runners.
+          err=$(mktemp)
+          org=$(gh api "orgs/$OWNER/actions/runners?per_page=100" 2>>"$err") || org=""
+          repo=$(gh api "repos/$REPO/actions/runners?per_page=100" 2>>"$err") || repo=""
+          none='{"runners":[]}'
+          pool=$(printf '%s\n%s\n' "${org:-$none}" "${repo:-$none}" \
+            | jq -s '[.[].runners[]] | unique_by(.id) | map(select(.status=="online") | select([.labels[].name] | index("mac-pro")))')
+          online=$(printf '%s' "$pool" | jq 'length')
+          dockerable=$(printf '%s' "$pool" | jq '[.[] | select([.labels[].name] | index("docker"))] | length')
+          # "No runner online" is only known when the org list was readable: the
+          # pool lives there, so an empty repo list alone proves nothing.
+          if [ -n "$org" ] || [ "$online" -gt 0 ]; then
+            if [ "$online" -gt 0 ]; then
+              if [ "$dockerable" -gt 0 ]; then
+                emit "$SELF" "$online mac-pro runner(s) online" "$SELF_DOCKER" "$dockerable of them carry the docker label"
+              else
+                emit "$SELF" "$online mac-pro runner(s) online" "$UBUNTU" "none of the online mac-pro runners carry the docker label"
+              fi
+            else
+              emit "$UBUNTU" "no mac-pro runner online, falling back so jobs do not queue" "$UBUNTU" "no mac-pro runner online"
+            fi
+          else
+            reason=$(tr -d '\r' < "$err" | grep -v '^[[:space:]]*$' | head -2 | tr '\n' ' ')
+            echo "::warning::runner probe failed: ${reason:-no error text}. RUNNER_STATUS_TOKEN needs org 'Self-hosted runners: read'."
+            # A failed probe is not "no runner": fork PRs already exited, and a
+            # queued self-hosted job costs nothing while a hosted one is billed.
+            # Set CI_HEAVY_RUNNER to force hosted.
+            emit "$SELF" "probe failed, queueing on the self-hosted pool; set CI_HEAVY_RUNNER to override" "$SELF_DOCKER" "probe failed, queueing on the self-hosted docker pool"
+          fi
+          rm -f "$err"
+      - run: echo "::notice::jobs -> ${{ steps.pick.outputs.target }} (${{ steps.pick.outputs.why }})"
